@@ -1,1 +1,0 @@
-# wbchse-hs-result-check
