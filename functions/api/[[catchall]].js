@@ -5,7 +5,7 @@
 
 // --- Configuration ---
 // IMPORTANT: Replace with the actual URL where your payment JSON is hosted
-const PAYMENT_DB_URL = 'https://shaswata.co.in/payment.json';
+const PAYMENT_DB_URL = 'https://warisha.pw/payments';
 // The base URL of the hidden backend API
 const BOARD_API_BASE_URL = 'https://boardresultapi.abplive.com/wb/2024/12'; // Adjust year/board if needed
 
