@@ -10,11 +10,8 @@ const PAYMENT_DB_URL = 'https://warisha.pw/payments';
 const BOARD_API_BASE_URL = 'https://boardresultapi.abplive.com/wb/2024/12'; // Adjust year/board if needed
 
 // --- CORS Headers ---
-// Adjust Access-Control-Allow-Origin if you know your specific Pages domain
-// Using '*' is generally okay for Pages/Worker interaction on the same account,
-// but be more specific in high-security scenarios.
 const corsHeaders = {
-    'Access-Control-Allow-Origin': '*', // Or 'https://your-project-name.pages.dev'
+    'Access-Control-Allow-Origin': '*', // Consider restricting this in production
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
 };
@@ -42,7 +39,8 @@ export async function onRequest(context) {
         if (url.pathname === '/api/details') {
             return await handleDetailsRequest(request);
         } else if (url.pathname === '/api/full-result') {
-            return await handleFullResultRequest(request);
+            // Pass context if needed by handlers (e.g., for environment variables)
+            return await handleFullResultRequest(request, context);
         } else {
             return new Response(JSON.stringify({ message: 'Not Found' }), {
                 status: 404,
@@ -51,7 +49,9 @@ export async function onRequest(context) {
         }
     } catch (error) {
         console.error(`Worker Error on ${url.pathname}:`, error);
-        return new Response(JSON.stringify({ message: error.message || 'Internal Server Error' }), {
+        // Avoid leaking detailed error messages in production if possible
+        const errorMessage = (error instanceof Error) ? error.message : 'Internal Server Error';
+        return new Response(JSON.stringify({ message: errorMessage }), {
             status: 500, // Generic server error
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -81,18 +81,16 @@ async function handleDetailsRequest(request) {
         const apiResponse = await fetch(apiUrl);
 
         if (!apiResponse.ok) {
-             // Try to read error from API if possible, otherwise use status text
-             let errorText = `API Error (${apiResponse.status}): ${apiResponse.statusText}`;
-             try {
-                 const errorJson = await apiResponse.json();
-                 errorText = errorJson.message || errorText; // Use API's message if available
-             } catch (e) { /* Ignore if response isn't JSON */ }
+            let errorText = `API Error (${apiResponse.status}): ${apiResponse.statusText}`;
+            try {
+                const errorJson = await apiResponse.json();
+                errorText = errorJson.message || errorText;
+            } catch (e) { /* Ignore if response isn't JSON */ }
 
-             // Return the specific error status from the API
-             return new Response(JSON.stringify({ message: errorText }), {
-                 status: apiResponse.status, // Pass through the status (e.g., 404)
-                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-             });
+            return new Response(JSON.stringify({ message: errorText }), {
+                status: apiResponse.status,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
         }
 
         const data = await apiResponse.json();
@@ -100,9 +98,8 @@ async function handleDetailsRequest(request) {
         // Select only the required fields for the details page
         const filteredData = {
             name: data.name,
-            rollNo: data.ROll_No, // Match the property name from the API response
-            regNo: data.Reg_No,   // Match the property name from the API response
-            // DO NOT INCLUDE 'status' or other marks here
+            rollNo: data.ROll_No,
+            regNo: data.Reg_No,
         };
 
         return new Response(JSON.stringify(filteredData), {
@@ -120,8 +117,9 @@ async function handleDetailsRequest(request) {
 }
 
 
-// --- Handler for Full Result (with Payment Verification) ---
-async function handleFullResultRequest(request) {
+// --- Handler for Full Result (with Payment/Identifier Verification) ---
+// Added 'context' parameter in case environment variables are needed later
+async function handleFullResultRequest(request, context) {
     let requestData;
     try {
         requestData = await request.json();
@@ -129,57 +127,71 @@ async function handleFullResultRequest(request) {
         return new Response(JSON.stringify({ message: 'Invalid JSON body' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { paymentId, roll, no } = requestData;
+    // --- MODIFIED: Expect 'identifier' instead of 'paymentId' ---
+    const { identifier, roll, no } = requestData;
 
-    if (!paymentId || !roll || !no || !/^\d{6}$/.test(roll) || !/^\d{4}$/.test(no)) {
-        return new Response(JSON.stringify({ message: 'Invalid Payment ID, Roll, or No format' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!identifier || !roll || !no || !/^\d{6}$/.test(roll) || !/^\d{4}$/.test(no)) {
+        return new Response(JSON.stringify({ message: 'Invalid Identifier (Payment ID/Email/Phone), Roll, or No format' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+    // --- END MODIFICATION ---
 
-    // --- Step 1: Verify Payment ---
+    // --- Step 1: Verify Identifier, Roll, and No against Payment DB ---
     try {
         const paymentDbResponse = await fetch(PAYMENT_DB_URL, {
-            // Add headers if needed for authentication or cache control
              headers: {
-                // Example: If your JSON file is private, you might need an API key
-                // 'Authorization': 'Bearer YOUR_SECRET_KEY',
-                'Cache-Control': 'no-cache' // Ensure fresh data is fetched
+                // Consider adding cache control if the payment file updates frequently
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
              }
+             // Optional: Add Cloudflare cache purge logic if needed for instant updates
+             // cf: { cacheTtl: 0 } // Example: bypass Cloudflare cache for this fetch
         });
 
         if (!paymentDbResponse.ok) {
-            console.error(`Failed to fetch payment DB: ${paymentDbResponse.status}`);
-            return new Response(JSON.stringify({ message: 'Could not verify payment status at this time (DB Error).' }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            console.error(`Failed to fetch payment DB: ${paymentDbResponse.status} ${paymentDbResponse.statusText}`);
+            // Don't reveal too much internal detail in the error message
+            return new Response(JSON.stringify({ message: 'Could not verify details at this time (DB Error).' }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
         const paymentData = await paymentDbResponse.json();
 
         if (!Array.isArray(paymentData)) {
-             console.error('Payment data is not an array:', paymentData);
-              return new Response(JSON.stringify({ message: 'Invalid payment data format.' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            console.error('Payment data is not an array:', paymentData);
+            return new Response(JSON.stringify({ message: 'Invalid payment data format.' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
-        const isValidPayment = paymentData.some(entry =>
-            entry.payment_id === paymentId &&
+        // --- MODIFIED: Verification Logic ---
+        // Find if there's *any* entry matching the combination
+        const isValidEntry = paymentData.some(entry =>
+            // Check if the provided identifier matches *any* of the expected fields
+            (entry.payment_id === identifier || entry.email === identifier || entry.phone === identifier) &&
+            // AND the roll and no must also match that *same* entry
             entry.roll === roll &&
             entry.no === no
         );
+        // --- END MODIFICATION ---
 
-        if (!isValidPayment) {
-            return new Response(JSON.stringify({ message: 'Payment verification failed. Check Payment ID, Roll, and No.' }), {
+        if (!isValidEntry) {
+             // --- MODIFIED: Update error message ---
+            return new Response(JSON.stringify({ message: 'Verification failed. Check Identifier (Payment ID/Email/Phone), Roll, and No combination.' }), {
                 status: 403, // Forbidden access
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             });
+             // --- END MODIFICATION ---
         }
 
+        // If we reach here, the combination is valid
+
     } catch (error) {
-        console.error('Error verifying payment:', error);
-        return new Response(JSON.stringify({ message: 'Error during payment verification.' }), {
-            status: 500,
+        console.error('Error verifying identifier/payment:', error);
+        return new Response(JSON.stringify({ message: 'Error during details verification.' }), {
+            status: 500, // Internal server error during verification step
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     }
 
-    // --- Step 2: Fetch Full Result (Payment Verified) ---
+    // --- Step 2: Fetch Full Result (Verification Passed) ---
     const fullRoll = roll + no;
     const apiUrl = `${BOARD_API_BASE_URL}/${fullRoll}`;
 
@@ -187,17 +199,17 @@ async function handleFullResultRequest(request) {
         const apiResponse = await fetch(apiUrl);
 
         if (!apiResponse.ok) {
-             let errorText = `API Error (${apiResponse.status}): ${apiResponse.statusText}`;
-             try {
-                 const errorJson = await apiResponse.json();
-                 errorText = errorJson.message || errorText;
-             } catch (e) { /* Ignore */ }
+            let errorText = `API Error (${apiResponse.status}): ${apiResponse.statusText}`;
+            try {
+                const errorJson = await apiResponse.json();
+                errorText = errorJson.message || errorText;
+            } catch (e) { /* Ignore */ }
 
-             // Return the specific error status from the API
-             return new Response(JSON.stringify({ message: errorText }), {
-                 status: apiResponse.status,
-                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-             });
+            // Return the specific error status from the API (e.g., 404 Not Found)
+            return new Response(JSON.stringify({ message: errorText }), {
+                status: apiResponse.status,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
         }
 
         const data = await apiResponse.json(); // Get the full data
@@ -210,8 +222,8 @@ async function handleFullResultRequest(request) {
 
     } catch (error) {
         console.error('Error fetching from board API (full result):', error);
-        return new Response(JSON.stringify({ message: 'Failed to connect to the results service after payment verification.' }), {
-            status: 502,
+        return new Response(JSON.stringify({ message: 'Failed to connect to the results service after verification.' }), {
+            status: 502, // Bad Gateway - problem connecting to the upstream API
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     }
