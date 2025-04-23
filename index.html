@@ -56,14 +56,20 @@
              <h3 class="text-lg font-semibold text-gray-800 mb-3">Get Full Result</h3>
              <p class="text-gray-600 mb-4 text-sm">To view your complete marksheet including subject scores and final status, please complete the payment.</p>
              <form>
-                <script src="https://checkout.razorpay.com/v1/payment-button.js" data-payment_button_id="pl_QMXOuva67vyoan" async> </script>
+                <script src="https://checkout.razorpay.com/v1/payment-button.js" data-payment_button_id="pl_QMXbT0aYIJhf56" async> </script>
              </form>
-             <p class="text-xs text-gray-500 mt-4">After successful payment, note down your Payment ID. You will need it along with your Roll and No to view the full result <a href="/full-result.html" class="text-indigo-600 hover:underline">here</a>.</p>
-        </div>
+
+             <div class="mt-5 p-4 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 rounded-md text-sm" role="alert">
+                <p class="font-medium">Important Payment Information:</p>
+                <p>After successful payment, please **note down your Payment ID**. You will need this ID, along with your Roll and No, to <a href="/full-result.html" class="font-semibold underline hover:text-yellow-800">view the full result here</a>.</p>
+                <p class="mt-2 text-xs">Disclaimer: During payment, Razorpay may ask for your email address or phone number solely for the purpose of sending you the Payment ID and receipt. This contact information is handled directly by Razorpay according to their privacy policy and is not stored or managed by this website.</p>
+            </div>
+            </div>
 
     </div>
 
     <script>
+        // JavaScript remains the same as before...
         const detailsForm = document.getElementById('detailsForm');
         const rollInput = document.getElementById('roll');
         const noInput = document.getElementById('no');
