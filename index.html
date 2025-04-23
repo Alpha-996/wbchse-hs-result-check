@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WB Board 12th Result Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Optional: Customize Tailwind theme if needed
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        // Set Inter as the default font
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Basic body styling */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Simple loader animation */
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto; /* Center the loader */
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Hide spinner by default */
+        .loader-container.hidden {
+            display: none;
+        }
+        /* Ensure table layout is fixed for consistent column widths */
+        table {
+            table-layout: fixed;
+            width: 100%;
+        }
+        /* Ensure status text color is applied correctly */
+        .status-passed {
+             color: #16a34a; /* Tailwind green-600 */
+        }
+        .status-failed {
+             color: #dc2626; /* Tailwind red-600 */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="container bg-white p-6 sm:p-8 rounded-lg shadow-md w-full max-w-3xl">
+        <h2 class="text-2xl sm:text-3xl font-bold text-center text-gray-800 mb-6">WBCHSE Class 12 Result</h2>
+
+        <form id="resultForm" class="space-y-4 sm:space-y-0 sm:flex sm:items-end sm:space-x-4 mb-6">
+            <div class="flex-grow">
+                <label for="roll" class="block text-sm font-medium text-gray-700 mb-1">Roll (6 digits)</label>
+                <input type="text" id="roll" placeholder="Enter Roll" maxlength="6" required
+                       class="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-base">
+            </div>
+            <div class="flex-grow">
+                <label for="no" class="block text-sm font-medium text-gray-700 mb-1">No (4 digits)</label>
+                <input type="text" id="no" placeholder="Enter No" maxlength="4" required
+                       class="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-base">
+            </div>
+            <button type="submit"
+                    class="w-full sm:w-auto inline-flex justify-center items-center px-6 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
+                Get Result
+            </button>
+        </form>
+
+        <div id="errorMsg" class="text-red-600 text-center font-medium mb-4 min-h-[1.5rem]"></div>
+
+        <div id="loaderContainer" class="loader-container hidden text-center mb-4">
+             <div class="loader"></div>
+             <p class="text-gray-600 mt-2">Loading...</p>
+        </div>
+
+
+        <div id="result" class="mt-6 space-y-4">
+             </div>
+    </div>
+
+    <script>
+        // Get references to DOM elements
+        const resultForm = document.getElementById('resultForm');
+        const rollInput = document.getElementById('roll');
+        const noInput = document.getElementById('no');
+        const errorMsg = document.getElementById('errorMsg');
+        const loaderContainer = document.getElementById('loaderContainer');
+        const resultContainer = document.getElementById('result');
+
+        // Add event listener for form submission
+        resultForm.addEventListener('submit', async function(event) {
+            event.preventDefault(); // Prevent default form submission
+
+            // Get and trim input values
+            const roll = rollInput.value.trim();
+            const no = noInput.value.trim();
+
+            // Clear previous results and errors
+            errorMsg.textContent = '';
+            resultContainer.innerHTML = '';
+
+            // --- Input Validation ---
+            if (!/^[0-9]{6}$/.test(roll)) {
+                errorMsg.textContent = 'Roll must be exactly 6 digits.';
+                rollInput.focus();
+                return;
+            }
+            if (!/^[0-9]{4}$/.test(no)) {
+                errorMsg.textContent = 'No must be exactly 4 digits.';
+                noInput.focus();
+                return;
+            }
+
+            // Combine roll and no
+            const fullRoll = roll + no;
+
+            // Show loader
+            loaderContainer.classList.remove('hidden');
+
+            try {
+                // --- API Call ---
+                // Construct the API URL using the combined roll and number
+                const apiUrl = `https://boardresultapi.abplive.com/wb/2024/12/${fullRoll}`;
+                const response = await fetch(apiUrl);
+
+                // Check if the response was successful (status code 200-299)
+                if (!response.ok) {
+                    let errorText = response.statusText; // Default error text
+                    // Try to parse JSON error message if available
+                    if (response.headers.get('content-type')?.includes('application/json')) {
+                        try {
+                            const errorData = await response.json();
+                            errorText = errorData.message || errorText; // Use message from JSON if present
+                        } catch (e) { /* Ignore JSON parsing error */ }
+                    } else {
+                         // Provide a more user-friendly message for non-JSON errors
+                         errorText = `Server returned status ${response.status}. Check Roll/No.`;
+                    }
+                    // Handle specific 404 (Not Found) error
+                    if (response.status === 404) {
+                         throw new Error('Result not found for the provided Roll and No.');
+                    }
+                    // Throw a generic error for other HTTP issues
+                    throw new Error(`Error ${response.status}: ${errorText}`);
+                }
+
+                // Parse the JSON response body
+                const data = await response.json();
+
+                // --- Data Validation ---
+                // Basic check if data exists and has essential fields like 'name'
+                if (!data || !data.name) {
+                    throw new Error('Invalid data received or Roll Number not found.');
+                }
+
+                // --- Build Result HTML ---
+                // Determine status color: Green for 'passed', Red otherwise. Case-insensitive check.
+                const statusText = data.status || 'N/A';
+                const statusColorClass = statusText.toLowerCase() === 'pass' ? 'text-green-600' : 'text-red-600'; // Use 'pass' as seen in some API examples, adjust if needed
+
+                // Start building the HTML string for the result display
+                let resultHtml = `
+                    <div class="bg-gray-50 p-4 rounded-md shadow-sm border border-gray-200">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-3">Candidate Details</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                            <p><strong class="font-medium text-gray-600">Name:</strong> ${data.name || 'N/A'}</p>
+                            <p><strong class="font-medium text-gray-600">Roll No:</strong> ${data.ROll_No || 'N/A'}</p>
+                            <p><strong class="font-medium text-gray-600">Registration No:</strong> ${data.Reg_No || 'N/A'}</p>
+                            <p><strong class="font-medium text-gray-600">Status:</strong> <span class="font-bold ${statusColorClass}">${statusText}</span></p>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto mt-4">
+                         <h4 class="text-lg font-semibold text-gray-800 mb-3">Subject Marks</h4>
+                         <table class="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-md shadow-sm">
+                             <thead class="bg-gray-100">
+                                 <tr>
+                                     <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                                     <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Theory</th>
+                                     <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Practical</th>
+                                     <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                     <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Grade</th>
+                                     <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Percent</th>
+                                 </tr>
+                             </thead>
+                             <tbody class="bg-white divide-y divide-gray-200">`;
+
+                // Loop through subjects (assuming max 7 subjects based on API structure)
+                for (let i = 1; i <= 7; i++) {
+                    const subjectCode = data[`sub_code${i}`]?.trim(); // Get subject code, trim whitespace
+                    if (subjectCode) { // Only add row if subject code exists
+                        resultHtml += `
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${subjectCode}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-center">${data[`thmarks${i}`] || '-'}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-center">${data[`prmarks${i}`] || '-'}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-center">${data[`totalmarks${i}`] || '-'}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-center">${data[`grade${i}`] || '-'}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-center">${data[`percent${i}`] || '-'}%</td>
+                            </tr>`;
+                    }
+                }
+
+                // Close table body and table
+                resultHtml += `
+                             </tbody>
+                         </table>
+                    </div>
+
+                    <div class="bg-indigo-50 p-4 rounded-md shadow-sm border border-indigo-200 mt-4">
+                        <h4 class="text-lg font-semibold text-gray-800 mb-3">Final Result Summary</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                            <p><strong class="font-medium text-gray-600">Total Marks:</strong> ${data.totalMarks || 'N/A'}</p>
+                            <p><strong class="font-medium text-gray-600">Overall Grade:</strong> ${data.finalGrade || 'N/A'}</p>
+                            <p><strong class="font-medium text-gray-600">Percentile:</strong> ${data.totalPercent || 'N/A'}%</p>
+                        </div>
+                    </div>`;
+
+                // --- Add Donation Button Conditionally ---
+                const totalMarks = parseInt(data.totalMarks); // Get total marks as a number
+                // Check if totalMarks is a valid number and greater than 350
+                if (!isNaN(totalMarks) && totalMarks > 350) {
+                    // Construct the UPI link details
+                    const upiId = 'lakshmi.saha@kotak'; // The UPI ID to send payment to
+                    // Payee name (pn) is removed
+                    const remarks = `Thank you for this I got ${totalMarks}`; // Dynamic remarks
+
+                    // **EDIT:** Construct the UPI payment link *without* the payee name (pn) parameter.
+                    // URL encode the remarks to handle spaces and special characters
+                    const upiLink = `upi://pay?pa=${upiId}&tn=${encodeURIComponent(remarks)}`;
+
+                    // Append the donation button HTML to the resultHtml string
+                    resultHtml += `
+                        <div class="mt-6 text-center">
+                            <p class="text-sm text-gray-600 mb-2">Congratulations on your excellent score! Consider supporting us.</p>
+                            <a href="${upiLink}" target="_blank" rel="noopener noreferrer"
+                               class="inline-flex justify-center items-center px-5 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 ease-in-out">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                  <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                </svg>
+                                Donate via UPI
+                            </a>
+                        </div>`;
+                }
+
+                // Display the generated HTML content in the result container
+                resultContainer.innerHTML = resultHtml;
+
+            } catch (err) {
+                // --- Error Handling ---
+                // Log the error to the console for debugging
+                console.error("Error fetching result:", err);
+                // Display user-friendly error messages based on the error type
+                 if (err.message.includes('Result not found')) {
+                      errorMsg.textContent = 'Result not found. Please double-check the Roll and No.';
+                 } else if (err.message.includes('Failed to fetch')) {
+                      errorMsg.textContent = 'Network error. Please check your connection and try again.';
+                 } else {
+                    // Display the specific error message or a generic one
+                    errorMsg.textContent = `Could not fetch result: ${err.message || 'An unknown error occurred.'}`;
+                 }
+            } finally {
+                // Hide loader regardless of success or failure
+                loaderContainer.classList.add('hidden');
+            }
+        });
+    </script>
+
+</body>
+</html>
