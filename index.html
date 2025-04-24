@@ -17,6 +17,8 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .loader-container.hidden { display: none; }
         #paymentSection.hidden { display: none; }
+        /* Add minimum height for the button container to avoid layout shifts */
+        #razorpay-button-container { min-height: 50px; }
     </style>
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
@@ -55,21 +57,20 @@
         <div id="paymentSection" class="mt-6 text-center hidden border-t pt-6">
              <h3 class="text-lg font-semibold text-gray-800 mb-3">Get Full Result</h3>
              <p class="text-gray-600 mb-4 text-sm">To view your complete marksheet including subject scores and final status, please complete the payment.</p>
-             <form>
-                <script src="https://checkout.razorpay.com/v1/payment-button.js" data-payment_button_id="pl_QMXOuva67vyoan" async> </script>
-             </form>
+
+             <div id="razorpay-button-container" class="mb-4">
+                 </div>
 
              <div class="mt-5 p-4 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 rounded-md text-sm" role="alert">
-                <p class="font-medium">Important Payment Information:</p>
-                <p>After successful payment, please **note down your Payment ID**. You will need this ID, along with your Roll and No, to <a href="/full-result.html" class="font-semibold underline hover:text-yellow-800">view the full result here</a>.</p>
-                <p class="mt-2 text-xs">Disclaimer: During payment, Razorpay may ask for your email address or phone number solely for the purpose of sending you the Payment ID and receipt. This contact information is handled directly by Razorpay according to their privacy policy and is not stored or managed by this website.</p>
-            </div>
-            </div>
+                 <p class="font-medium">Important Payment Information:</p>
+                 <p>After successful payment, please **note down your Payment ID**. You will need this ID, along with your Roll and No, to <a href="/full-result.html" class="font-semibold underline hover:text-yellow-800">view the full result here</a>.</p>
+                 <p class="mt-2 text-xs">Disclaimer: During payment, Razorpay may ask for your email address or phone number solely for the purpose of sending you the Payment ID and receipt. This contact information is handled directly by Razorpay according to their privacy policy and is not stored or managed by this website.</p>
+             </div>
+        </div>
 
     </div>
 
     <script>
-        // JavaScript remains the same as before...
         const detailsForm = document.getElementById('detailsForm');
         const rollInput = document.getElementById('roll');
         const noInput = document.getElementById('no');
@@ -77,6 +78,7 @@
         const loaderContainer = document.getElementById('loaderContainer');
         const detailsResultContainer = document.getElementById('detailsResult');
         const paymentSection = document.getElementById('paymentSection');
+        const razorpayButtonContainer = document.getElementById('razorpay-button-container'); // Get the container
 
         detailsForm.addEventListener('submit', async function(event) {
             event.preventDefault();
@@ -87,9 +89,10 @@
             // Clear previous results and errors
             errorMsg.textContent = '';
             detailsResultContainer.innerHTML = '';
+            razorpayButtonContainer.innerHTML = ''; // Clear previous button
             paymentSection.classList.add('hidden'); // Hide payment section initially
 
-            // Basic Frontend Validation (HTML pattern attribute also helps)
+            // Basic Frontend Validation
             if (!/^[0-9]{6}$/.test(roll)) {
                 errorMsg.textContent = 'Roll must be exactly 6 digits.';
                 rollInput.focus();
@@ -115,15 +118,15 @@
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ // Try to parse error, fallback if not JSON
-                         message: `Error ${response.status}: ${response.statusText}. Please check Roll/No or try again later.`
+                    const errorData = await response.json().catch(() => ({
+                        message: `Error ${response.status}: ${response.statusText}. Please check Roll/No or try again later.`
                     }));
                     throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
 
-                // --- Build Basic Details HTML (No Status) ---
+                // --- Build Basic Details HTML ---
                 let resultHtml = `
                     <div class="bg-gray-50 p-4 rounded-md shadow-sm border border-gray-200">
                         <h3 class="text-xl font-semibold text-gray-800 mb-3">Candidate Details Found</h3>
@@ -131,16 +134,35 @@
                             <p><strong class="font-medium text-gray-600">Name:</strong> ${data.name || 'N/A'}</p>
                             <p><strong class="font-medium text-gray-600">Roll No:</strong> ${data.rollNo || 'N/A'}</p>
                             <p><strong class="font-medium text-gray-600">Registration No:</strong> ${data.regNo || 'N/A'}</p>
-                            </div>
+                        </div>
                     </div>`;
 
                 detailsResultContainer.innerHTML = resultHtml;
-                paymentSection.classList.remove('hidden'); // Show payment section
+
+                // --- Dynamically create and add Razorpay button ---
+                if (data.paymentButtonId) {
+                    const rzpForm = document.createElement('form'); // Create a form element
+
+                    const rzpScript = document.createElement('script');
+                    rzpScript.src = "https://checkout.razorpay.com/v1/payment-button.js";
+                    rzpScript.setAttribute('data-payment_button_id', data.paymentButtonId); // Use fetched ID
+                    rzpScript.async = true;
+
+                    rzpForm.appendChild(rzpScript); // Add script to the form
+                    razorpayButtonContainer.appendChild(rzpForm); // Add form to the container
+                    paymentSection.classList.remove('hidden'); // Show payment section
+                } else {
+                     // Handle case where paymentButtonId is missing (optional)
+                     console.warn("Payment Button ID not received from server.");
+                     errorMsg.textContent = (errorMsg.textContent ? errorMsg.textContent + " " : "") + "Payment option unavailable.";
+                }
+
 
             } catch (err) {
                 console.error("Error fetching details:", err);
                 errorMsg.textContent = `Could not fetch details: ${err.message}`;
                 detailsResultContainer.innerHTML = ''; // Clear any partial results
+                razorpayButtonContainer.innerHTML = ''; // Clear button on error
                 paymentSection.classList.add('hidden'); // Ensure payment section is hidden on error
             } finally {
                 // Hide loader
