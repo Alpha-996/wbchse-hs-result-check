@@ -17,7 +17,6 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .loader-container.hidden { display: none; }
         #paymentSection.hidden { display: none; }
-        /* Add minimum height for the button container to avoid layout shifts */
         #razorpay-button-container { min-height: 50px; }
     </style>
 </head>
@@ -78,13 +77,28 @@
         const loaderContainer = document.getElementById('loaderContainer');
         const detailsResultContainer = document.getElementById('detailsResult');
         const paymentSection = document.getElementById('paymentSection');
-        const razorpayButtonContainer = document.getElementById('razorpay-button-container'); // Get the container
+        const razorpayButtonContainer = document.getElementById('razorpay-button-container');
+
+        // --- START: Get Referral Key ---
+        // Function to extract the referral key (e.g., 'subhra', 'koyel') from the path
+        function getReferralKey() {
+            const path = window.location.pathname.toLowerCase(); // e.g., '/', '/subhra', '/koyel'
+            const parts = path.split('/').filter(part => part !== ''); // Split and remove empty parts
+            if (parts.length === 1) {
+                // Only return if it's a single path segment (like 'subhra')
+                // You might want to add more validation here if needed
+                return parts[0];
+            }
+            return null; // Return null if it's the root path or has multiple segments
+        }
+        // --- END: Get Referral Key ---
 
         detailsForm.addEventListener('submit', async function(event) {
             event.preventDefault();
 
             const roll = rollInput.value.trim();
             const no = noInput.value.trim();
+            const referralKey = getReferralKey(); // Get the referral key from the URL path
 
             // Clear previous results and errors
             errorMsg.textContent = '';
@@ -108,14 +122,20 @@
             loaderContainer.classList.remove('hidden');
 
             try {
-                // Call the Cloudflare Worker endpoint for basic details
-                const response = await fetch('/api/details', { // Relative path to the worker
+                // --- MODIFIED: Send referralKey to the backend ---
+                const requestBody = { roll, no };
+                if (referralKey) {
+                    requestBody.referralKey = referralKey; // Add referralKey if it exists
+                }
+
+                const response = await fetch('/api/details', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ roll, no }),
+                    body: JSON.stringify(requestBody), // Send roll, no, and potentially referralKey
                 });
+                // --- END MODIFICATION ---
 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({
@@ -124,7 +144,7 @@
                     throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
                 }
 
-                const data = await response.json();
+                const data = await response.json(); // The backend now sends the correct paymentButtonId
 
                 // --- Build Basic Details HTML ---
                 let resultHtml = `
@@ -139,33 +159,31 @@
 
                 detailsResultContainer.innerHTML = resultHtml;
 
-                // --- Dynamically create and add Razorpay button ---
+                // --- Use the paymentButtonId received from the backend ---
                 if (data.paymentButtonId) {
-                    const rzpForm = document.createElement('form'); // Create a form element
-
+                    const rzpForm = document.createElement('form');
                     const rzpScript = document.createElement('script');
                     rzpScript.src = "https://checkout.razorpay.com/v1/payment-button.js";
-                    rzpScript.setAttribute('data-payment_button_id', data.paymentButtonId); // Use fetched ID
+                    // *** Use the ID provided by the backend ***
+                    rzpScript.setAttribute('data-payment_button_id', data.paymentButtonId);
                     rzpScript.async = true;
 
-                    rzpForm.appendChild(rzpScript); // Add script to the form
-                    razorpayButtonContainer.appendChild(rzpForm); // Add form to the container
-                    paymentSection.classList.remove('hidden'); // Show payment section
+                    rzpForm.appendChild(rzpScript);
+                    razorpayButtonContainer.appendChild(rzpForm);
+                    paymentSection.classList.remove('hidden');
                 } else {
-                     // Handle case where paymentButtonId is missing (optional)
-                     console.warn("Payment Button ID not received from server.");
-                     errorMsg.textContent = (errorMsg.textContent ? errorMsg.textContent + " " : "") + "Payment option unavailable.";
+                    console.warn("Payment Button ID not received from server.");
+                    errorMsg.textContent = (errorMsg.textContent ? errorMsg.textContent + " " : "") + "Payment option unavailable.";
                 }
-
+                // --- END ---
 
             } catch (err) {
                 console.error("Error fetching details:", err);
                 errorMsg.textContent = `Could not fetch details: ${err.message}`;
-                detailsResultContainer.innerHTML = ''; // Clear any partial results
-                razorpayButtonContainer.innerHTML = ''; // Clear button on error
-                paymentSection.classList.add('hidden'); // Ensure payment section is hidden on error
+                detailsResultContainer.innerHTML = '';
+                razorpayButtonContainer.innerHTML = '';
+                paymentSection.classList.add('hidden');
             } finally {
-                // Hide loader
                 loaderContainer.classList.add('hidden');
             }
         });
