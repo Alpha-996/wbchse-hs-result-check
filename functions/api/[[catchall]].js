@@ -5,7 +5,7 @@
 
 // --- Configuration ---
 const PAYMENT_DB_URL = 'https://warisha.pw/payments'; // Replace with your actual payment DB URL
-const BOARD_API_BASE_URL = 'https://boardresultapi.abplive.com/wb/2024/12'; // Adjust year/board if needed
+const BOARD_API_BASE_URL = 'https://boardresultapi.abplive.com/wb/2025/12'; // Adjust year/board if needed
 
 // --- START: Referral Configuration (Moved to Backend) ---
 // Map referral keys (lowercase) to specific Razorpay Button IDs
