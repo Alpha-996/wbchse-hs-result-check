@@ -1,27 +1,34 @@
 /**
- * Cloudflare Worker to proxy WB Board Result API calls and handle payment verification.
+ * Cloudflare Worker to proxy WB Board Result API calls, handle referrals, and payment verification.
  * Handles requests to /api/details and /api/full-result
  */
 
 // --- Configuration ---
-// IMPORTANT: Replace with the actual URL where your payment JSON is hosted
-const PAYMENT_DB_URL = 'https://warisha.pw/payments'; // Example URL
-// The base URL of the hidden backend API
+const PAYMENT_DB_URL = 'https://warisha.pw/payments'; // Replace with your actual payment DB URL
 const BOARD_API_BASE_URL = 'https://boardresultapi.abplive.com/wb/2024/12'; // Adjust year/board if needed
-// *** ADD YOUR RAZORPAY BUTTON ID HERE (Ideally from environment variable) ***
-const RAZORPAY_BUTTON_ID = 'pl_QMXOuva67vyoan'; // Replace with your actual ID
+
+// --- START: Referral Configuration (Moved to Backend) ---
+// Map referral keys (lowercase) to specific Razorpay Button IDs
+const referralButtonMap = {
+    'subhra': 'pl_QRCx74QvShiAil', // Button ID for Subhra
+    'koyel': 'pl_QMWdxwIPVZYTpi'   // Button ID for Koyel
+    // Add more friends here: 'friendname': 'button_id'
+};
+// Define the default Button ID (used if the referralKey doesn't match)
+const defaultRazorpayButtonId = 'pl_QMXOuva67vyoan'; // Your original default ID
+// --- END: Referral Configuration ---
+
 
 // --- CORS Headers ---
 const corsHeaders = {
-    'Access-Control-Allow-Origin': '*', // Consider restricting this in production
+    'Access-Control-Allow-Origin': '*', // Consider restricting this in production: e.g., 'https://yourdomain.com'
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
 };
 
 // --- Main Handler ---
-// This is the primary export Cloudflare looks for
 export async function onRequest(context) {
-    const { request } = context;
+    const { request, env } = context; // `env` holds environment variables if set
     const url = new URL(request.url);
 
     // Handle CORS preflight requests (OPTIONS)
@@ -40,10 +47,10 @@ export async function onRequest(context) {
     // --- Routing ---
     try {
         if (url.pathname === '/api/details') {
-            return await handleDetailsRequest(request);
+            // Pass env variables if needed (e.g., if button IDs are stored there)
+            return await handleDetailsRequest(request, env);
         } else if (url.pathname === '/api/full-result') {
-            // Pass context if needed by handlers (e.g., for environment variables)
-            return await handleFullResultRequest(request, context);
+            return await handleFullResultRequest(request, env); // Pass env if needed
         } else {
             return new Response(JSON.stringify({ message: 'Not Found' }), {
                 status: 404,
@@ -52,18 +59,17 @@ export async function onRequest(context) {
         }
     } catch (error) {
         console.error(`Worker Error on ${url.pathname}:`, error);
-        // Avoid leaking detailed error messages in production if possible
         const errorMessage = (error instanceof Error) ? error.message : 'Internal Server Error';
         return new Response(JSON.stringify({ message: errorMessage }), {
-            status: 500, // Generic server error
+            status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     }
 }
 
 
-// --- Handler for Basic Details ---
-async function handleDetailsRequest(request) {
+// --- Handler for Basic Details (Now with Referral Logic) ---
+async function handleDetailsRequest(request, env) { // Added env parameter
     let requestData;
     try {
         requestData = await request.json();
@@ -71,11 +77,23 @@ async function handleDetailsRequest(request) {
         return new Response(JSON.stringify({ message: 'Invalid JSON body' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { roll, no } = requestData;
+    // --- Read roll, no, and the new referralKey ---
+    const { roll, no, referralKey } = requestData;
 
     if (!roll || !no || !/^\d{6}$/.test(roll) || !/^\d{4}$/.test(no)) {
         return new Response(JSON.stringify({ message: 'Invalid Roll or No format' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+
+    // --- Determine the correct Razorpay Button ID ---
+    let paymentButtonIdToUse = defaultRazorpayButtonId; // Start with the default
+    if (referralKey && referralButtonMap[referralKey.toLowerCase()]) {
+        // If a valid referralKey was sent and exists in our map, use that ID
+        paymentButtonIdToUse = referralButtonMap[referralKey.toLowerCase()];
+    }
+    // You could also potentially override these with environment variables:
+    // paymentButtonIdToUse = env[referralKey.toUpperCase() + '_BUTTON_ID'] || defaultRazorpayButtonId;
+    // --- End Button ID Determination ---
+
 
     const fullRoll = roll + no;
     const apiUrl = `${BOARD_API_BASE_URL}/${fullRoll}`;
@@ -98,15 +116,15 @@ async function handleDetailsRequest(request) {
 
         const data = await apiResponse.json();
 
-        // Select required fields and add the payment button ID
+        // --- Select required fields and add the *determined* payment button ID ---
         const responsePayload = {
             name: data.name,
-            rollNo: data.ROll_No, // Corrected key based on your previous code
-            regNo: data.Reg_No,   // Corrected key based on your previous code
-            paymentButtonId: RAZORPAY_BUTTON_ID // Include the ID here
+            rollNo: data.ROll_No,
+            regNo: data.Reg_No,
+            paymentButtonId: paymentButtonIdToUse // Use the ID determined above
         };
 
-        return new Response(JSON.stringify(responsePayload), { // Send the modified payload
+        return new Response(JSON.stringify(responsePayload), {
             status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -114,7 +132,7 @@ async function handleDetailsRequest(request) {
     } catch (error) {
         console.error('Error fetching from board API (details):', error);
         return new Response(JSON.stringify({ message: 'Failed to connect to the results service.' }), {
-            status: 502, // Bad Gateway might be appropriate
+            status: 502,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     }
@@ -122,8 +140,8 @@ async function handleDetailsRequest(request) {
 
 
 // --- Handler for Full Result (with Payment/Identifier Verification) ---
-// Added 'context' parameter in case environment variables are needed later
-async function handleFullResultRequest(request, context) {
+// No changes needed here for the referral logic, but passing 'env' for consistency
+async function handleFullResultRequest(request, env) { // Added env parameter
     let requestData;
     try {
         requestData = await request.json();
@@ -131,7 +149,6 @@ async function handleFullResultRequest(request, context) {
         return new Response(JSON.stringify({ message: 'Invalid JSON body' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // --- Expect 'identifier' (Payment ID/Email/Phone) ---
     const { identifier, roll, no } = requestData;
 
     if (!identifier || !roll || !no || !/^\d{6}$/.test(roll) || !/^\d{4}$/.test(no)) {
@@ -141,13 +158,13 @@ async function handleFullResultRequest(request, context) {
     // --- Step 1: Verify Identifier, Roll, and No against Payment DB ---
     try {
         const paymentDbResponse = await fetch(PAYMENT_DB_URL, {
-            headers: {
+            headers: { // Ensure fresh data is fetched
                 'Cache-Control': 'no-cache, no-store, must-revalidate',
                 'Pragma': 'no-cache',
                 'Expires': '0'
-            }
-            // Optional: Add Cloudflare cache settings if needed
-            // cf: { cacheTtl: 0 } // Example: bypass Cloudflare cache for this fetch
+            },
+            // Optional: Bypass Cloudflare cache for this specific fetch if needed
+            // cf: { cacheTtl: 0 }
         });
 
         if (!paymentDbResponse.ok) {
@@ -159,34 +176,33 @@ async function handleFullResultRequest(request, context) {
 
         if (!Array.isArray(paymentData)) {
             console.error('Payment data is not an array:', paymentData);
-            return new Response(JSON.stringify({ message: 'Invalid payment data format.' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            return new Response(JSON.stringify({ message: 'Payment data format error.' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
-        // --- Verification Logic ---
-        const isValidEntry = paymentData.some(entry =>
-            (String(entry.payment_id) === String(identifier) || String(entry.email) === String(identifier) || String(entry.phone) === String(identifier)) && // Compare as strings for safety
-            String(entry.roll) === String(roll) &&
-            String(entry.no) === String(no)
+        // Normalize identifier for comparison (e.g., lowercase email)
+        const normalizedIdentifier = identifier.toLowerCase();
+
+        // Find a matching payment record
+        const isValidPayment = paymentData.some(record =>
+            record.roll === roll &&
+            record.no === no &&
+            (
+                (record.payment_id && record.payment_id.toLowerCase() === normalizedIdentifier) ||
+                (record.email && record.email.toLowerCase() === normalizedIdentifier) ||
+                (record.phone && record.phone === identifier) // Assuming phone is stored as string digits
+            )
         );
 
-        if (!isValidEntry) {
-            return new Response(JSON.stringify({ message: 'Verification failed. Check Identifier (Payment ID/Email/Phone), Roll, and No combination.' }), {
-                status: 403, // Forbidden access
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            });
+        if (!isValidPayment) {
+            return new Response(JSON.stringify({ message: 'Verification failed. Payment not found or details mismatch.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
-        // Verification passed
-
     } catch (error) {
-        console.error('Error verifying identifier/payment:', error);
-        return new Response(JSON.stringify({ message: 'Error during details verification.' }), {
-            status: 500, // Internal server error during verification step
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        console.error('Error verifying payment:', error);
+        return new Response(JSON.stringify({ message: 'Error during payment verification.' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // --- Step 2: Fetch Full Result (Verification Passed) ---
+    // --- Step 2: If verification passed, fetch the full result ---
     const fullRoll = roll + no;
     const apiUrl = `${BOARD_API_BASE_URL}/${fullRoll}`;
 
@@ -194,30 +210,35 @@ async function handleFullResultRequest(request, context) {
         const apiResponse = await fetch(apiUrl);
 
         if (!apiResponse.ok) {
-            let errorText = `API Error (${apiResponse.status}): ${apiResponse.statusText}`;
-            try {
-                const errorJson = await apiResponse.json();
-                errorText = errorJson.message || errorText;
-            } catch (e) { /* Ignore */ }
+             let errorText = `API Error (${apiResponse.status}): ${apiResponse.statusText}`;
+             try {
+                 const errorJson = await apiResponse.json();
+                 errorText = errorJson.message || errorText;
+             } catch (e) { /* Ignore */ }
 
-            return new Response(JSON.stringify({ message: errorText }), {
-                status: apiResponse.status,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            });
+             // Handle specific case where result exists but details couldn't be fetched after payment check
+             if (apiResponse.status === 404) {
+                 errorText = 'Result found, but could not retrieve full details after verification. Please contact support.';
+             }
+
+             return new Response(JSON.stringify({ message: errorText }), {
+                 status: apiResponse.status === 404 ? 500 : apiResponse.status, // Return 500 if 404 after verification
+                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+             });
         }
 
-        const data = await apiResponse.json(); // Get the full data
+        const resultData = await apiResponse.json();
 
-        // Return the complete data
-        return new Response(JSON.stringify(data), {
+        // --- Return the full result data ---
+        return new Response(JSON.stringify(resultData), {
             status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
 
     } catch (error) {
         console.error('Error fetching from board API (full result):', error);
-        return new Response(JSON.stringify({ message: 'Failed to connect to the results service after verification.' }), {
-            status: 502, // Bad Gateway - problem connecting to the upstream API
+        return new Response(JSON.stringify({ message: 'Failed to connect to the results service for full details.' }), {
+            status: 502,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     }
