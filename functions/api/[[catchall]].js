@@ -12,6 +12,7 @@ const BOARD_API_BASE_URL = 'https://boardresultapi.abplive.com/wb/2025/12'; // A
 const referralButtonMap = {
     'subhra': 'pl_QRCx74QvShiAil', // Button ID for Subhra
     'koyel': 'pl_QMWdxwIPVZYTpi'   // Button ID for Koyel
+    'anwesha': 'pl_QRfw57xno82GiV'   // Button ID for Anwesha
     // Add more friends here: 'friendname': 'button_id'
 };
 // Define the default Button ID (used if the referralKey doesn't match)
