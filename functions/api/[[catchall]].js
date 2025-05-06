@@ -11,7 +11,7 @@ const BOARD_API_BASE_URL = 'https://boardresultapi.abplive.com/wb/2025/12'; // A
 // Map referral keys (lowercase) to specific Razorpay Button IDs
 const referralButtonMap = {
     'subhra': 'pl_QRCx74QvShiAil', // Button ID for Subhra
-    'koyel': 'pl_QMWdxwIPVZYTpi'   // Button ID for Koyel
+    'koyel': 'pl_QMWdxwIPVZYTpi',   // Button ID for Koyel
     'anwesha': 'pl_QRfw57xno82GiV'   // Button ID for Anwesha
     // Add more friends here: 'friendname': 'button_id'
 };
